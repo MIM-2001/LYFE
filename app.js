@@ -3,7 +3,8 @@
 (() => {
   const KEY = 'lyfe.v1';
   const DEFAULTS = { wage: 0, weeklyGoal: 0, weekStart: 0, currency: 'USD', theme: 'system' };
-  const VIEWS = ['home', 'history', 'insights', 'settings'];
+  const VIEWS = ['home', 'history', 'jobs', 'insights', 'settings'];
+  const COLORS = ['#0f766e', '#2563eb', '#7c3aed', '#db2777', '#ea580c', '#ca8a04', '#16a34a', '#475569'];
   const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const WD_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -26,6 +27,8 @@
   const pct = (n) => `${Math.round(n * 100)}%`;
   const fmtHours = (h) => `${+h.toFixed(2)}h`;
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const fmtTime = (t) => { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}${m ? `:${pad(m)}` : ''}${h < 12 ? 'am' : 'pm'}`; };
+  const TIME_RE = /^\d{2}:\d{2}$/;
 
   function fmtDate(s) {
     const d = parseISO(s);
@@ -65,8 +68,9 @@
       id: String(s.id || uid()),
       date: s.date,
       job: String(s.job ?? '').trim(),
-      start: /^\d{2}:\d{2}$/.test(s.start) ? s.start : '',
-      end: /^\d{2}:\d{2}$/.test(s.end) ? s.end : '',
+      jobId: String(s.jobId ?? ''),
+      start: TIME_RE.test(s.start) ? s.start : '',
+      end: TIME_RE.test(s.end) ? s.end : '',
       hours: Math.max(0, num(s.hours)),
       cash: num(s.cash),
       digital: num(s.digital),
@@ -77,18 +81,58 @@
     };
   }
 
+  function normalizeJob(j) {
+    const name = String(j?.name ?? '').trim().slice(0, 60);
+    if (!name) return null;
+    return {
+      id: String(j.id || uid()),
+      name,
+      wage: Math.max(0, num(j.wage)),
+      start: TIME_RE.test(j.start) ? j.start : '',
+      end: TIME_RE.test(j.end) ? j.end : '',
+      tipOutPct: Math.min(100, Math.max(0, num(j.tipOutPct))),
+      color: /^#[0-9a-f]{6}$/i.test(j.color) ? j.color : COLORS[0],
+    };
+  }
+
+  // Builds { shifts, settings, jobs } from stored or imported data. Data saved before
+  // jobs existed has no jobs list, so one is created from the job names on its shifts.
+  function hydrate(raw) {
+    const d = { shifts: raw.shifts.map(normalize).filter(Boolean), settings: { ...DEFAULTS, ...raw.settings } };
+    d.jobs = Array.isArray(raw.jobs) ? raw.jobs.map(normalizeJob).filter(Boolean) : [];
+    if (!Array.isArray(raw.jobs)) linkJobs(d);
+    return d;
+  }
+
+  // Gives every shift with a job name but no saved job a matching job, creating it if needed.
+  function linkJobs(d) {
+    const ids = new Set(d.jobs.map((j) => j.id));
+    for (const s of [...d.shifts].sort((a, b) => b.date.localeCompare(a.date))) {
+      if (!s.job || ids.has(s.jobId)) continue;
+      let job = d.jobs.find((j) => j.name.toLowerCase() === s.job.toLowerCase());
+      if (!job) {
+        job = normalizeJob({ name: s.job, wage: s.wage, start: s.start, end: s.end, color: COLORS[d.jobs.length % COLORS.length] });
+        d.jobs.push(job);
+        ids.add(job.id);
+      }
+      s.jobId = job.id;
+      s.job = job.name;
+    }
+  }
+
   function load() {
     try {
       const raw = JSON.parse(localStorage.getItem(KEY) || 'null');
-      if (raw && Array.isArray(raw.shifts)) {
-        return { shifts: raw.shifts.map(normalize).filter(Boolean), settings: { ...DEFAULTS, ...raw.settings } };
-      }
+      if (raw && Array.isArray(raw.shifts)) return hydrate(raw);
     } catch { /* corrupted or blocked storage: start fresh */ }
-    return { shifts: [], settings: { ...DEFAULTS } };
+    return { shifts: [], settings: { ...DEFAULTS }, jobs: [] };
   }
 
+  const jobById = (id) => (id ? data.jobs.find((j) => j.id === id) : undefined);
+  const nextColor = () => COLORS.find((c) => !data.jobs.some((j) => j.color === c)) || COLORS[data.jobs.length % COLORS.length];
+
   let data = load();
-  const ui = { view: 'home', period: 'week', range: '90', query: '', editing: null };
+  const ui = { view: 'home', period: 'week', range: '90', query: '', jobFilter: '', editing: null, formJob: '', orphanName: '', autoFill: {}, tipOutManual: false, editingJob: null, jobColor: COLORS[0] };
 
   function save() {
     data.shifts.sort((a, b) => b.date.localeCompare(a.date) || b.start.localeCompare(a.start));
@@ -196,11 +240,12 @@
   function shiftRow(s) {
     const c = calc(s);
     const d = parseISO(s.date);
+    const job = jobById(s.jobId);
     const parts = [`Cash ${money(s.cash)}`, `Digital ${money(s.digital)}`];
     if (s.tipOut) parts.push(`Tip-out ${money(s.tipOut)}`);
     return `<button type="button" class="row" data-edit="${esc(s.id)}">
         <div class="row-date"><b>${d.getDate()}</b><small>${MO[d.getMonth()]} · ${WD[d.getDay()]}</small></div>
-        <div class="row-main"><div>${esc(s.job || 'Shift')}${s.hours ? ` · ${fmtHours(s.hours)}` : ''}</div><small>${parts.join(' · ')}</small></div>
+        <div class="row-main"><div>${job ? `<i class="dot" style="background:${job.color}"></i>` : ''}${esc(s.job || 'Shift')}${s.hours ? ` · ${fmtHours(s.hours)}` : ''}</div><small>${parts.join(' · ')}</small></div>
         <div class="row-amt">${money(c.total)}${s.hours ? `<small>${money(c.total / s.hours)}/hr</small>` : ''}</div>
       </button>`;
   }
@@ -326,24 +371,30 @@
   function renderHistory() {
     const el = $('#view-history');
     if (!el.dataset.ready) {
-      el.innerHTML = `<input type="search" id="q" placeholder="Search by job, notes, day or date" aria-label="Search shifts"><div id="history-list" class="view"></div>`;
+      el.innerHTML = `<input type="search" id="q" placeholder="Search by job, notes, day or date" aria-label="Search shifts"><div id="history-filters"></div><div id="history-list" class="view"></div>`;
       el.dataset.ready = '1';
       $('#q').addEventListener('input', (e) => { ui.query = e.target.value; renderHistoryList(); });
     }
+    if (!jobById(ui.jobFilter)) ui.jobFilter = '';
+    $('#history-filters').innerHTML = data.jobs.length < 2 ? '' : `<div class="chips" role="group" aria-label="Filter by job">
+        <button type="button" class="chip" data-filter-job="" aria-pressed="${!ui.jobFilter}">All jobs</button>
+        ${data.jobs.map((j) => `<button type="button" class="chip" data-filter-job="${j.id}" aria-pressed="${ui.jobFilter === j.id}"><i class="dot" style="background:${j.color}"></i>${esc(j.name)}</button>`).join('')}
+      </div>`;
     renderHistoryList();
   }
 
   function renderHistoryList() {
     const el = $('#history-list');
     const q = ui.query.trim().toLowerCase();
+    const shifts = ui.jobFilter ? data.shifts.filter((s) => s.jobId === ui.jobFilter) : data.shifts;
     const list = q
-      ? data.shifts.filter((s) => {
+      ? shifts.filter((s) => {
           const d = parseISO(s.date);
           return `${s.date} ${s.job} ${s.notes} ${WD_LONG[d.getDay()]} ${MO_LONG[d.getMonth()]}`.toLowerCase().includes(q);
         })
-      : data.shifts;
+      : shifts;
     if (!list.length) {
-      el.innerHTML = `<section class="card empty"><p class="muted">${q ? 'No shifts match your search.' : 'No shifts yet. Tap + to log one.'}</p></section>`;
+      el.innerHTML = `<section class="card empty"><p class="muted">${q || ui.jobFilter ? 'No shifts match.' : 'No shifts yet. Tap + to log one.'}</p></section>`;
       return;
     }
     const groups = new Map();
@@ -360,6 +411,39 @@
           <div class="list card">${arr.map(shiftRow).join('')}</div>
         </section>`;
     }).join('');
+  }
+
+  function renderJobs() {
+    const el = $('#view-jobs');
+    const head = `<div class="card-head page-head"><h2 class="page-title">Your jobs</h2><button type="button" class="btn primary" data-action="new-job">+ Add job</button></div>`;
+    if (!data.jobs.length) {
+      el.innerHTML = `${head}<section class="card empty">
+          <h2>Save your jobs</h2>
+          <p>Add each place you work with its hourly wage, usual shift times and tip-out. When you log a shift, just tap the job and LYFE fills the rest in.</p>
+          <button type="button" class="btn primary" data-action="new-job">Add your first job</button>
+        </section>`;
+      return;
+    }
+    el.innerHTML = head + data.jobs.map((j) => {
+      const t = summarize(data.shifts.filter((s) => s.jobId === j.id));
+      const defaults = [
+        j.wage ? `${money(j.wage)}/hr wage` : 'No base wage',
+        j.start && j.end ? `${fmtTime(j.start)} – ${fmtTime(j.end)}` : '',
+        j.tipOutPct ? `${j.tipOutPct}% tip-out` : '',
+      ].filter(Boolean).join(' · ');
+      return `<section class="card job-card" style="--job:${j.color}">
+          <div class="card-head">
+            <div><h2>${esc(j.name)}</h2><small class="muted">${defaults}</small></div>
+            <button type="button" class="btn sm" data-edit-job="${j.id}">Edit</button>
+          </div>
+          <div class="job-stats">
+            <div><small>Take-home</small><b>${money(t.total)}</b></div>
+            <div><small>Per hour</small><b>${t.hours ? money(t.perHour) : '—'}</b></div>
+            <div><small>Shifts</small><b>${t.count}</b></div>
+          </div>
+          <button type="button" class="btn primary block" data-log-job="${j.id}">Log a shift here</button>
+        </section>`;
+    }).join('') + '<p class="muted small center">Changes to a job apply to new shifts. Renaming a job also renames its past shifts.</p>';
   }
 
   function renderInsights() {
@@ -464,7 +548,7 @@
     $('#view-settings').innerHTML = `
       <section class="card">
         <h2>Pay</h2>
-        <label class="field"><span>Default hourly wage</span><input type="number" name="wage" inputmode="decimal" step="0.01" min="0" value="${s.wage || ''}" placeholder="0.00"></label>
+        <label class="field"><span>Default hourly wage <em>(when no job is picked)</em></span><input type="number" name="wage" inputmode="decimal" step="0.01" min="0" value="${s.wage || ''}" placeholder="0.00"></label>
         <label class="field"><span>Weekly take-home goal</span><input type="number" name="weeklyGoal" inputmode="decimal" step="1" min="0" value="${s.weeklyGoal || ''}" placeholder="No goal"></label>
         <label class="field" style="margin:0"><span>Currency</span><select name="currency">${CURRENCIES.map((c) => opt(c, c, s.currency)).join('')}</select></label>
       </section>
@@ -484,11 +568,11 @@
         </div>
         <button type="button" class="btn danger" data-action="wipe">Erase all data</button>
       </section>
-      <p class="muted small center">LYFE · ${plural(data.shifts.length, 'shift')} stored · press N to log a shift</p>`;
+      <p class="muted small center">LYFE · ${plural(data.shifts.length, 'shift')} and ${plural(data.jobs.length, 'job')} stored · press N to log a shift</p>`;
   }
 
   function render() {
-    ({ home: renderHome, history: renderHistory, insights: renderInsights, settings: renderSettings })[ui.view]();
+    ({ home: renderHome, history: renderHistory, jobs: renderJobs, insights: renderInsights, settings: renderSettings })[ui.view]();
   }
 
   function route() {
@@ -508,20 +592,18 @@
   const form = $('#shift-form');
   const preview = $('#form-preview');
 
-  function openForm(id) {
+  function openForm(id, jobId) {
     const s = id ? data.shifts.find((x) => x.id === id) : null;
     const f = form.elements;
     form.reset();
     ui.editing = s ? s.id : null;
+    ui.autoFill = {};
+    ui.tipOutManual = Boolean(s); // never recalculate a saved shift's tip-out on its own
     $('#form-title').textContent = s ? 'Edit shift' : 'Log shift';
     $('#delete-btn').hidden = !s;
 
-    const jobs = [...new Set(data.shifts.map((x) => x.job).filter(Boolean))];
-    $('#jobs').innerHTML = jobs.map((j) => `<option value="${esc(j)}">`).join('');
-
     const blank = (n) => (n ? String(n) : '');
     f.date.value = s ? s.date : iso(today());
-    f.job.value = s ? s.job : data.shifts[0]?.job || '';
     f.start.value = s?.start || '';
     f.end.value = s?.end || '';
     f.hours.value = blank(s?.hours);
@@ -531,9 +613,74 @@
     f.sales.value = blank(s?.sales);
     f.wage.value = blank(s ? s.wage : data.settings.wage);
     f.notes.value = s?.notes || '';
-    updatePreview();
+    f.job.value = '';
+
+    if (s) {
+      // A shift whose job was deleted keeps its name as a one-off "orphan" choice.
+      ui.formJob = jobById(s.jobId) ? s.jobId : s.job ? 'orphan' : '';
+      ui.orphanName = ui.formJob === 'orphan' ? s.job : '';
+      renderJobChips();
+      applyTipOut();
+      updatePreview();
+    } else {
+      ui.orphanName = '';
+      const recent = data.shifts.find((x) => jobById(x.jobId));
+      const pick = jobById(jobId) ? jobId : recent ? recent.jobId : data.jobs.length === 1 ? data.jobs[0].id : '';
+      selectJob(pick);
+    }
     dialog.showModal();
     if (!s && window.matchMedia('(pointer: fine)').matches) f.cash.focus();
+  }
+
+  function renderJobChips() {
+    const chip = (val, label, color) =>
+      `<button type="button" class="chip${val === 'new' ? ' add' : ''}" role="radio" aria-checked="${ui.formJob === val}" data-job="${val}">${color ? `<i class="dot" style="background:${color}"></i>` : ''}${label}</button>`;
+    $('#job-chips').innerHTML = [
+      ...data.jobs.map((j) => chip(j.id, esc(j.name), j.color)),
+      ui.orphanName ? chip('orphan', esc(ui.orphanName), '') : '',
+      chip('new', '+ New job', ''),
+    ].join('');
+    form.elements.job.hidden = ui.formJob !== 'new';
+  }
+
+  // Fills wage and usual hours from the chosen job. Start/end are only replaced when
+  // empty or still holding values a previous job filled in, so typed times are kept.
+  function selectJob(val) {
+    const f = form.elements;
+    ui.formJob = val;
+    const job = jobById(val);
+    if (job) {
+      f.wage.value = job.wage ? String(job.wage) : '';
+      for (const k of ['start', 'end']) {
+        if (job[k] && (!f[k].value || f[k].value === ui.autoFill[k])) {
+          f[k].value = job[k];
+          ui.autoFill[k] = job[k];
+        }
+      }
+      const h = hoursBetween(f.start.value, f.end.value);
+      if (h != null) f.hours.value = h;
+    } else if (!ui.editing && val !== 'orphan') {
+      f.wage.value = data.settings.wage ? String(data.settings.wage) : '';
+    }
+    renderJobChips();
+    applyTipOut();
+    updatePreview();
+    if (val === 'new') f.job.focus();
+  }
+
+  // Suggests tip-out from the job's % of sales until the tip-out is typed by hand.
+  function applyTipOut() {
+    const job = jobById(ui.formJob);
+    const hint = $('#tipout-hint');
+    if (!job || !job.tipOutPct) {
+      hint.textContent = '';
+      if (!ui.tipOutManual) form.elements.tipOut.value = ''; // drop a previous job's suggestion
+      return;
+    }
+    hint.textContent = `${job.tipOutPct}% of sales`;
+    if (ui.tipOutManual) return;
+    const sales = parseAmount(form.elements.sales.value);
+    form.elements.tipOut.value = sales > 0 ? String(round2((sales * job.tipOutPct) / 100)) : '';
   }
 
   function readAmounts() {
@@ -563,6 +710,8 @@
   }
 
   form.addEventListener('input', (e) => {
+    if (e.target.name === 'tipOut') ui.tipOutManual = true;
+    if (e.target.name === 'sales') applyTipOut();
     if (e.target.name === 'start' || e.target.name === 'end') {
       const h = hoursBetween(form.elements.start.value, form.elements.end.value);
       if (h != null) form.elements.hours.value = h;
@@ -580,7 +729,21 @@
     }
     if (v.hours > 24) { f.hours.focus(); return toast('Hours can’t be more than 24'); }
 
-    const shift = normalize({ ...v, id: ui.editing || uid(), date: f.date.value, job: f.job.value, start: f.start.value, end: f.end.value, notes: f.notes.value });
+    let job = jobById(ui.formJob);
+    let newJob = false;
+    if (ui.formJob === 'new') {
+      const name = f.job.value.trim();
+      if (!name) { f.job.focus(); return toast('Name the new job, or pick a saved one'); }
+      job = data.jobs.find((j) => j.name.toLowerCase() === name.toLowerCase());
+      if (!job) {
+        job = normalizeJob({ name, wage: v.wage, start: f.start.value, end: f.end.value, color: nextColor() });
+        data.jobs.push(job);
+        newJob = true;
+      }
+    }
+    const jobName = job ? job.name : ui.formJob === 'orphan' ? ui.orphanName : '';
+
+    const shift = normalize({ ...v, id: ui.editing || uid(), date: f.date.value, job: jobName, jobId: job ? job.id : '', start: f.start.value, end: f.end.value, notes: f.notes.value });
     const i = data.shifts.findIndex((s) => s.id === shift.id);
     if (i >= 0) data.shifts[i] = shift;
     else data.shifts.push(shift);
@@ -588,12 +751,79 @@
     save();
     dialog.close();
     render();
-    toast(i >= 0 ? 'Shift updated' : `Saved: ${money(calc(shift).total)} take-home`);
+    toast(`${i >= 0 ? 'Shift updated' : `Saved: ${money(calc(shift).total)} take-home`}${newJob ? ` · ${job.name} added to Jobs` : ''}`);
     // Ask the browser not to evict our data. Safari otherwise clears site storage after weeks without a visit.
     if (first && navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   });
 
-  dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
+
+  // ---------- job form ----------
+  const jobDialog = $('#job-dialog');
+  const jobForm = $('#job-form');
+
+  function renderSwatches() {
+    $('#swatches').innerHTML = COLORS.map((c) =>
+      `<button type="button" class="swatch" role="radio" aria-checked="${ui.jobColor === c}" aria-label="Color ${c}" data-color="${c}" style="background:${c}"></button>`).join('');
+  }
+
+  function openJobForm(id) {
+    const j = jobById(id);
+    const f = jobForm.elements;
+    jobForm.reset();
+    ui.editingJob = j ? j.id : null;
+    ui.jobColor = j ? j.color : nextColor();
+    $('#job-title').textContent = j ? 'Edit job' : 'Add job';
+    $('#delete-job-btn').hidden = !j;
+    f.name.value = j?.name || '';
+    f.wage.value = j?.wage ? String(j.wage) : data.settings.wage ? String(data.settings.wage) : '';
+    f.tipOutPct.value = j?.tipOutPct ? String(j.tipOutPct) : '';
+    f.start.value = j?.start || '';
+    f.end.value = j?.end || '';
+    renderSwatches();
+    jobDialog.showModal();
+    if (!j) f.name.focus();
+  }
+
+  jobForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const f = jobForm.elements;
+    const name = f.name.value.trim();
+    if (!name) { f.name.focus(); return toast('Give the job a name'); }
+    if (data.jobs.some((j) => j.id !== ui.editingJob && j.name.toLowerCase() === name.toLowerCase())) {
+      f.name.focus();
+      return toast(`You already have a job called ${name}`);
+    }
+    const pctVal = num(f.tipOutPct.value);
+    if (pctVal < 0 || pctVal > 100) { f.tipOutPct.focus(); return toast('Tip-out must be between 0 and 100%'); }
+    const job = normalizeJob({ id: ui.editingJob || undefined, name, wage: f.wage.value, tipOutPct: f.tipOutPct.value, start: f.start.value, end: f.end.value, color: ui.jobColor });
+    const i = data.jobs.findIndex((j) => j.id === job.id);
+    if (i >= 0) {
+      data.jobs[i] = job;
+      for (const s of data.shifts) if (s.jobId === job.id) s.job = job.name;
+    } else {
+      data.jobs.push(job);
+    }
+    save();
+    jobDialog.close();
+    render();
+    toast(i >= 0 ? 'Job updated' : `${job.name} saved`);
+  });
+
+  function deleteJob(id) {
+    const job = jobById(id);
+    if (!job) return;
+    const count = data.shifts.filter((s) => s.jobId === id).length;
+    const msg = `Delete ${job.name}?${count ? ` Its ${plural(count, 'shift')} stay in your history.` : ''}`;
+    if (!confirm(msg)) return;
+    data.jobs = data.jobs.filter((j) => j.id !== id);
+    for (const s of data.shifts) if (s.jobId === id) s.jobId = '';
+    save();
+    jobDialog.close();
+    render();
+    toast(`${job.name} deleted`);
+  }
+
+  for (const d of [dialog, jobDialog]) d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
 
   function deleteShift(id) {
     const i = data.shifts.findIndex((s) => s.id === id);
@@ -668,6 +898,7 @@
       data.shifts.push(s);
       added++;
     }
+    linkJobs(data);
     save();
     render();
     toast(`Imported ${plural(added, 'shift')}${skipped ? `, skipped ${skipped} duplicate or invalid` : ''}`);
@@ -681,9 +912,9 @@
   function restore(text) {
     const obj = JSON.parse(text);
     if (!obj || !Array.isArray(obj.shifts)) throw new Error('That file isn’t a LYFE backup.');
-    const shifts = obj.shifts.map(normalize).filter(Boolean);
-    if (!confirm(`Replace your ${plural(data.shifts.length, 'shift')} with the ${plural(shifts.length, 'shift')} in this backup?`)) return;
-    data = { shifts, settings: { ...DEFAULTS, ...obj.settings } };
+    const restored = hydrate(obj);
+    if (!confirm(`Replace your ${plural(data.shifts.length, 'shift')} with the ${plural(restored.shifts.length, 'shift')} in this backup?`)) return;
+    data = restored;
     save();
     makeFormatter();
     applyTheme();
@@ -730,9 +961,14 @@
 
   // ---------- global events ----------
   document.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-action],[data-edit],[data-seg],[data-plus]');
+    const t = e.target.closest('[data-action],[data-edit],[data-seg],[data-plus],[data-job],[data-edit-job],[data-log-job],[data-filter-job],[data-color]');
     if (!t) return;
     if (t.dataset.edit) return openForm(t.dataset.edit);
+    if (t.dataset.job) return selectJob(t.dataset.job === ui.formJob && t.dataset.job !== 'new' ? '' : t.dataset.job);
+    if (t.dataset.editJob) return openJobForm(t.dataset.editJob);
+    if (t.dataset.logJob) return openForm(null, t.dataset.logJob);
+    if ('filterJob' in t.dataset) { ui.jobFilter = t.dataset.filterJob; return renderHistory(); }
+    if (t.dataset.color) { ui.jobColor = t.dataset.color; return renderSwatches(); }
     if (t.dataset.seg) { ui[t.dataset.seg] = t.dataset.value; return render(); }
     if (t.dataset.plus) {
       const input = form.elements[t.dataset.plus];
@@ -742,6 +978,9 @@
     }
     switch (t.dataset.action) {
       case 'new': openForm(); break;
+      case 'new-job': openJobForm(); break;
+      case 'close-job': jobDialog.close(); break;
+      case 'delete-job': deleteJob(ui.editingJob); break;
       case 'cancel': dialog.close(); break;
       case 'delete': dialog.close(); deleteShift(ui.editing); break;
       case 'backup': backup(); break;
@@ -749,9 +988,9 @@
       case 'export-csv': exportCSV(); break;
       case 'import-csv': pickFile('csv', '.csv,text/csv'); break;
       case 'wipe':
-        if (!data.shifts.length) { toast('There’s nothing to erase'); break; }
-        if (confirm(`Erase all ${plural(data.shifts.length, 'shift')} and settings from this device? Download a backup first if you might want them back.`)) {
-          data = { shifts: [], settings: { ...DEFAULTS } };
+        if (!data.shifts.length && !data.jobs.length) { toast('There’s nothing to erase'); break; }
+        if (confirm(`Erase all ${plural(data.shifts.length, 'shift')}, ${plural(data.jobs.length, 'job')} and settings from this device? Download a backup first if you might want them back.`)) {
+          data = { shifts: [], settings: { ...DEFAULTS }, jobs: [] };
           save(); makeFormatter(); applyTheme(); render();
           toast('All data erased');
         }
@@ -773,7 +1012,7 @@
   });
 
   document.addEventListener('keydown', (e) => {
-    if ((e.key || '').toLowerCase() !== 'n' || e.metaKey || e.ctrlKey || e.altKey || dialog.open) return;
+    if ((e.key || '').toLowerCase() !== 'n' || e.metaKey || e.ctrlKey || e.altKey || dialog.open || jobDialog.open) return;
     if (e.target.closest('input, textarea, select')) return;
     e.preventDefault();
     openForm();

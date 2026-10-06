@@ -6,12 +6,13 @@ A lightweight income and tip tracker built for servers and other tipped workers.
 
 ## Features
 
-- **Fast shift logging.** Enter date, job, start/end time (hours fill in automatically, including overnight shifts), cash tips, digital tips, tip-out, sales and hourly wage.
+- **Saved jobs.** Save each place you work with its hourly wage, usual shift times, tip-out % of sales and a color. When you log a shift, tap the job and the wage, hours and tip-out fill in. Each job shows its own take-home, $/hr and shift count, and History can be filtered by job.
+- **Fast shift logging.** Pick a job, then enter date, start/end time (hours fill in automatically, including overnight shifts), cash tips, digital tips, tip-out, sales and hourly wage.
 - **Built-in adding.** Tap **+** or type `40+25+12.50` (or `3x20+5`) to total your cash table by table.
 - **Live preview.** See tips after tip-out, take-home, $/hr and tip % before you save.
 - **Dashboard.** Week, month, year or all-time take-home, with a cash vs. digital split, $/hr, average per shift, a comparison against the same point last period, a weekly goal and a daily or monthly tips chart.
 - **Insights.** Your best and worst days of the week (per shift and per hour), tip % on sales, tip-out share, best shift, month-end projection, breakdown by job and year-to-date cash vs. digital totals.
-- **History.** Shifts grouped by month with subtotals, plus search by job, notes, weekday or date. Tap a shift to edit it. Deleting a shift can be undone.
+- **History.** Shifts grouped by month with subtotals, plus a job filter and search by job, notes, weekday or date. Tap a shift to edit it. Deleting a shift can be undone.
 - **Your data, portable.** JSON backup and restore, plus CSV export and import, which also works for moving data in from a spreadsheet.
 - **Works offline and installs like an app.** Add it to your home screen.
 - **Light and dark mode**, multiple currencies, and a choice of Sunday or Monday week start.
