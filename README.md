@@ -13,6 +13,7 @@ A lightweight income and tip tracker built for servers and other tipped workers.
 - **Dashboard.** Week, month, year or all-time take-home, with a cash vs. digital split, $/hr, average per shift, a comparison against the same point last period, a weekly goal and a daily or monthly tips chart.
 - **Insights.** Your best and worst days of the week (per shift and per hour), tip % on sales, tip-out share, best shift, month-end projection, breakdown by job and year-to-date cash vs. digital totals.
 - **History.** Shifts grouped by month with subtotals, plus a job filter and search by job, notes, weekday or date. Tap a shift to edit it. Deleting a shift can be undone.
+- **Backup safety net.** **Back up now** opens your phone's share sheet so you can save the backup to iCloud Drive, Google Drive, Files or email. Home reminds you when you've never backed up, or when a week of changes hasn't been backed up. LYFE also asks the browser to exempt its data from automatic clearing.
 - **Your data, portable.** JSON backup and restore, plus CSV export and import, which also works for moving data in from a spreadsheet.
 - **Works offline and installs like an app.** Add it to your home screen.
 - **Light and dark mode**, multiple currencies, and a choice of Sunday or Monday week start.

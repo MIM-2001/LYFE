@@ -218,6 +218,10 @@ textarea { resize: vertical; }
 .calc:empty { display: none; }
 .hint { margin: -6px 0 12px; font-size: 12px; color: var(--muted); }
 
+.notice { display: flex; align-items: center; gap: 12px; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.notice small { display: block; margin-top: 2px; color: var(--muted); }
+.notice .btn { flex-shrink: 0; }
+
 /* Jobs */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {

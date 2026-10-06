@@ -101,6 +101,8 @@
     const d = { shifts: raw.shifts.map(normalize).filter(Boolean), settings: { ...DEFAULTS, ...raw.settings } };
     d.jobs = Array.isArray(raw.jobs) ? raw.jobs.map(normalizeJob).filter(Boolean) : [];
     if (!Array.isArray(raw.jobs)) linkJobs(d);
+    d.updatedAt = num(raw.updatedAt);
+    d.lastBackupAt = num(raw.lastBackupAt);
     return d;
   }
 
@@ -125,16 +127,18 @@
       const raw = JSON.parse(localStorage.getItem(KEY) || 'null');
       if (raw && Array.isArray(raw.shifts)) return hydrate(raw);
     } catch { /* corrupted or blocked storage: start fresh */ }
-    return { shifts: [], settings: { ...DEFAULTS }, jobs: [] };
+    return { shifts: [], settings: { ...DEFAULTS }, jobs: [], updatedAt: 0, lastBackupAt: 0 };
   }
 
   const jobById = (id) => (id ? data.jobs.find((j) => j.id === id) : undefined);
   const nextColor = () => COLORS.find((c) => !data.jobs.some((j) => j.color === c)) || COLORS[data.jobs.length % COLORS.length];
 
   let data = load();
-  const ui = { view: 'home', period: 'week', range: '90', query: '', jobFilter: '', editing: null, formJob: '', orphanName: '', autoFill: {}, tipOutManual: false, editingJob: null, jobColor: COLORS[0] };
+  const ui = { view: 'home', period: 'week', range: '90', query: '', jobFilter: '', editing: null, formJob: '', orphanName: '', autoFill: {}, tipOutManual: false, editingJob: null, jobColor: COLORS[0], persisted: false };
 
-  function save() {
+  // `changed` is false for bookkeeping writes (like recording a backup) that shouldn't count as new data.
+  function save(changed = true) {
+    if (changed) data.updatedAt = Date.now();
     data.shifts.sort((a, b) => b.date.localeCompare(a.date) || b.start.localeCompare(a.start));
     try {
       localStorage.setItem(KEY, JSON.stringify(data));
@@ -294,6 +298,25 @@
   }
 
   // ---------- views ----------
+  const WEEK_MS = 7 * 864e5;
+  // Remind when nothing has ever been backed up, or when changes have gone a week without one.
+  const needsBackup = () => data.shifts.length > 0 &&
+    (!data.lastBackupAt || (data.updatedAt > data.lastBackupAt && Date.now() - data.lastBackupAt > WEEK_MS));
+
+  function lastBackupText() {
+    if (!data.lastBackupAt) return 'never';
+    const days = daysBetween(new Date(data.lastBackupAt), new Date());
+    return days < 1 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+  }
+
+  function backupNotice() {
+    if (!needsBackup()) return '';
+    return `<section class="card notice">
+        <div><b>Back up your shifts</b><small>Last backup: ${lastBackupText()}. Save a copy to iCloud Drive, Google Drive, Files or email so a cleared browser or lost phone can’t erase it.</small></div>
+        <button type="button" class="btn primary sm" data-action="backup">Back up now</button>
+      </section>`;
+  }
+
   function renderHome() {
     const el = $('#view-home');
     if (!data.shifts.length) {
@@ -313,6 +336,7 @@
     if (t.sales) extra.push(stat('Tip %', `${(t.tipPct * 100).toFixed(1)}%`));
 
     el.innerHTML = `
+      ${backupNotice()}
       ${seg('period', [['week', 'Week'], ['month', 'Month'], ['year', 'Year'], ['all', 'All']], ui.period)}
       <section class="card">
         <p class="eyebrow">Take-home · ${esc(p.label)}</p>
@@ -559,9 +583,15 @@
       </section>
       <section class="card">
         <h2>Your data</h2>
-        <p class="muted small" style="margin:0">Your shifts are stored only in this browser on this device. Download a backup now and then, especially before clearing browser data or switching phones.</p>
+        <p class="muted small" style="margin:0 0 12px">Your shifts are stored only in this browser on this device. Back up regularly to iCloud Drive, Google Drive, Files or email. A backup file is the only copy that survives a cleared browser or a lost phone.</p>
+        <dl class="kv small">
+          <dt>Last backup</dt><dd>${lastBackupText()}</dd>
+          <dt>Protected from auto-clearing</dt><dd>${ui.persisted ? 'Yes' : 'Not guaranteed'}</dd>
+          <dt>Installed as an app</dt><dd>${isInstalled() ? 'Yes' : 'No'}</dd>
+        </dl>
+        ${isInstalled() ? '' : '<p class="muted small">Install LYFE to your home screen (iPhone: Share → Add to Home Screen) so the browser treats its data as app data and doesn’t clear it.</p>'}
         <div class="btn-row">
-          <button type="button" class="btn" data-action="backup">Download backup</button>
+          <button type="button" class="btn primary" data-action="backup">Back up now</button>
           <button type="button" class="btn" data-action="restore">Restore backup</button>
           <button type="button" class="btn" data-action="export-csv">Export CSV</button>
           <button type="button" class="btn" data-action="import-csv">Import CSV</button>
@@ -753,7 +783,7 @@
     render();
     toast(`${i >= 0 ? 'Shift updated' : `Saved: ${money(calc(shift).total)} take-home`}${newJob ? ` · ${job.name} added to Jobs` : ''}`);
     // Ask the browser not to evict our data. Safari otherwise clears site storage after weeks without a visit.
-    if (first && navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+    if (first) protectStorage();
   });
 
 
@@ -904,9 +934,38 @@
     toast(`Imported ${plural(added, 'shift')}${skipped ? `, skipped ${skipped} duplicate or invalid` : ''}`);
   }
 
-  function backup() {
-    const payload = { app: 'LYFE', version: 1, exportedAt: new Date().toISOString(), ...data };
-    download(`lyfe-backup-${iso(today())}.json`, JSON.stringify(payload, null, 2), 'application/json');
+  // On phones this opens the share sheet so the file can go straight to iCloud Drive,
+  // Google Drive, Files or email; elsewhere it downloads the file.
+  async function backup() {
+    const name = `lyfe-backup-${iso(today())}.json`;
+    const text = JSON.stringify({ app: 'LYFE', version: 1, exportedAt: new Date().toISOString(), ...data }, null, 2);
+    const file = typeof File === 'function' ? new File([text], name, { type: 'application/json' }) : null;
+    if (file && navigator.canShare?.({ files: [file] }) && window.matchMedia('(pointer: coarse)').matches) {
+      try {
+        await navigator.share({ files: [file], title: 'LYFE backup' });
+      } catch (err) {
+        if (err.name === 'AbortError') return; // closed the share sheet without saving
+        download(name, text, 'application/json');
+      }
+    } else {
+      download(name, text, 'application/json');
+    }
+    data.lastBackupAt = Date.now();
+    save(false);
+    render();
+    toast(`Backup saved: ${plural(data.shifts.length, 'shift')}, ${plural(data.jobs.length, 'job')}`);
+  }
+
+  const isInstalled = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
+  // Asks the browser to exempt our storage from automatic eviction.
+  async function protectStorage() {
+    if (!navigator.storage?.persisted) return;
+    try {
+      ui.persisted = await navigator.storage.persisted();
+      if (!ui.persisted && data.shifts.length) ui.persisted = await navigator.storage.persist();
+    } catch { /* unsupported; leave as not guaranteed */ }
+    if (ui.view === 'settings') render();
   }
 
   function restore(text) {
@@ -915,6 +974,7 @@
     const restored = hydrate(obj);
     if (!confirm(`Replace your ${plural(data.shifts.length, 'shift')} with the ${plural(restored.shifts.length, 'shift')} in this backup?`)) return;
     data = restored;
+    data.lastBackupAt = Date.now(); // the data now matches a backup file
     save();
     makeFormatter();
     applyTheme();
@@ -990,7 +1050,7 @@
       case 'wipe':
         if (!data.shifts.length && !data.jobs.length) { toast('There’s nothing to erase'); break; }
         if (confirm(`Erase all ${plural(data.shifts.length, 'shift')}, ${plural(data.jobs.length, 'job')} and settings from this device? Download a backup first if you might want them back.`)) {
-          data = { shifts: [], settings: { ...DEFAULTS }, jobs: [] };
+          data = { shifts: [], settings: { ...DEFAULTS }, jobs: [], updatedAt: 0, lastBackupAt: 0 };
           save(); makeFormatter(); applyTheme(); render();
           toast('All data erased');
         }
@@ -1034,6 +1094,7 @@
   applyTheme();
   $('#today-label').textContent = fmtDate(iso(today()));
   route();
+  protectStorage();
 
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
