@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="LYFE — track your income and tips, and see what pays best.">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="LYFE">
+  <title>LYFE</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash.
+    try { var t = (JSON.parse(localStorage.getItem('lyfe.v1') || '{}').settings || {}).theme; if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1 class="brand"><img src="icons/icon.svg" alt="" width="24" height="24">LYFE</h1>
+    <span class="muted small" id="today-label"></span>
+  </header>
+
+  <main>
+    <div class="view" id="view-home"></div>
+    <div class="view" id="view-history" hidden></div>
+    <div class="view" id="view-insights" hidden></div>
+    <div class="view" id="view-settings" hidden></div>
+  </main>
+
+  <nav class="tabbar" aria-label="Main">
+    <a href="#home" data-nav="home">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span>
+    </a>
+    <a href="#history" data-nav="history">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg><span>History</span>
+    </a>
+    <button type="button" class="fab" data-action="new" aria-label="Log a shift" title="Log a shift (N)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+    <a href="#insights" data-nav="insights">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M11 20V5M17 20v-6M3 20h18"/></svg><span>Insights</span>
+    </a>
+    <a href="#settings" data-nav="settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg><span>Settings</span>
+    </a>
+  </nav>
+
+  <dialog id="shift-dialog" aria-labelledby="form-title">
+    <form id="shift-form" autocomplete="off" novalidate>
+      <header class="sheet-head">
+        <h2 id="form-title">Log shift</h2>
+        <button type="button" class="icon-btn" data-action="cancel" aria-label="Close">&times;</button>
+      </header>
+
+      <div class="grid2">
+        <label class="field"><span>Date</span><input type="date" name="date" required></label>
+        <label class="field"><span>Job</span><input name="job" list="jobs" maxlength="60" placeholder="Where you worked"></label>
+      </div>
+
+      <div class="grid3">
+        <label class="field"><span>Start</span><input type="time" name="start"></label>
+        <label class="field"><span>End</span><input type="time" name="end"></label>
+        <label class="field"><span>Hours</span><input type="number" name="hours" inputmode="decimal" step="0.01" min="0" max="24" placeholder="0"></label>
+      </div>
+
+      <div class="grid2">
+        <div class="field cash">
+          <label for="f-cash">Cash tips</label>
+          <div class="input-wrap">
+            <input id="f-cash" name="cash" inputmode="decimal" placeholder="0.00">
+            <button type="button" class="plus" data-plus="cash" aria-label="Add another cash amount">+</button>
+          </div>
+          <small class="calc" data-for="cash"></small>
+        </div>
+        <div class="field digital">
+          <label for="f-digital">Digital tips</label>
+          <div class="input-wrap">
+            <input id="f-digital" name="digital" inputmode="decimal" placeholder="0.00">
+            <button type="button" class="plus" data-plus="digital" aria-label="Add another digital amount">+</button>
+          </div>
+          <small class="calc" data-for="digital"></small>
+        </div>
+      </div>
+      <p class="hint">Tap <b>+</b> to add up several amounts, such as each table's cash.</p>
+
+      <div class="grid3">
+        <label class="field"><span>Tip-out</span><input name="tipOut" inputmode="decimal" placeholder="0.00"></label>
+        <label class="field"><span>Sales <em>(optional)</em></span><input name="sales" inputmode="decimal" placeholder="0.00"></label>
+        <label class="field"><span>Hourly wage</span><input type="number" name="wage" inputmode="decimal" step="0.01" min="0" placeholder="0.00"></label>
+      </div>
+
+      <label class="field"><span>Notes</span><textarea name="notes" rows="2" maxlength="500" placeholder="Busy brunch, big party, short-staffed…"></textarea></label>
+
+      <div class="preview" id="form-preview" aria-live="polite"></div>
+
+      <footer class="sheet-foot">
+        <button type="button" class="btn danger" data-action="delete" id="delete-btn">Delete</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" data-action="cancel">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <datalist id="jobs"></datalist>
+  <input type="file" id="file-input" hidden>
+  <div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

@@ -1,0 +1,6 @@
+.DS_Store
+node_modules/
+*.log
+# personal data exports
+lyfe-backup-*.json
+lyfe-shifts-*.csv
