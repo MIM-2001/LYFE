@@ -26,9 +26,17 @@ python3 -m http.server 8000
 # then visit http://localhost:8000
 ```
 
+### Live app
+
+**https://lyfe-tips.netlify.app** is hosted on Netlify. `netlify.toml` holds the config (no build step; the repo root is published). To redeploy manually:
+
+```sh
+netlify deploy --prod
+```
+
 ### Install on your phone
 
-Host it with GitHub Pages (Settings → Pages → Deploy from branch → `main` / root), open the URL on your phone, then:
+Open the live URL on your phone, then:
 
 - **iPhone (Safari):** Share → *Add to Home Screen*
 - **Android (Chrome):** ⋮ → *Install app*

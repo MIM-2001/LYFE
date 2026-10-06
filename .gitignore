@@ -4,3 +4,4 @@ node_modules/
 # personal data exports
 lyfe-backup-*.json
 lyfe-shifts-*.csv
+.netlify/
